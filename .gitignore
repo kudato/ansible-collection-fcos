@@ -1,0 +1,22 @@
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+
+# Ansible collection build artifacts
+*.tar.gz
+
+# IDE
+.vscode/
+*.swp
+
+# Virtual environments
+venv/
+.venv/
+
+# Testing
+.pytest_cache/
+.coverage
+
