@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: MIT
+---
+namespace: kudato
+name: fcos
+version: 0.1.0
+
+readme: README.md
+
+authors:
+  - Aleksander Shevchenko <kudato@me.com>
+
+description: Ansible collection for bootstrapping and managing Fedora CoreOS systems
+
+license:
+  - MIT
+
+tags:
+  - fedora
+  - coreos
+  - fcos
+  - ignition
+  - butane
+  - linux
+
+dependencies: {}
+
+repository: https://github.com/kudato/ansible-collection-fcos
