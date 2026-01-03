@@ -1,0 +1,49 @@
+---
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    name: Release to GitHub & Ansible Galaxy
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Extract version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Validate version in galaxy.yml
+        run: |
+          GALAXY_VERSION=$(grep '^version:' galaxy.yml | awk '{print $2}')
+          if [ "$GALAXY_VERSION" != "${{ steps.version.outputs.version }}" ]; then
+            echo "::error::Version mismatch! Tag: ${{ steps.version.outputs.version }}, galaxy.yml: $GALAXY_VERSION"
+            exit 1
+          fi
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install ansible-core
+        run: pip install ansible-core
+
+      - name: Build collection
+        run: ansible-galaxy collection build
+
+      - name: Publish to Ansible Galaxy
+        run: ansible-galaxy collection publish *.tar.gz --api-key ${{ secrets.GALAXY_API_KEY }}
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${{ github.ref_name }}" --generate-notes
