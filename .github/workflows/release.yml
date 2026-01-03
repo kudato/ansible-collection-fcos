@@ -10,6 +10,7 @@ jobs:
   release:
     name: Release to GitHub & Ansible Galaxy
     runs-on: ubuntu-latest
+    environment: release
     permissions:
       contents: write
 
