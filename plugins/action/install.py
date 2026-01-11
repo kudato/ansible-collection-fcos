@@ -31,9 +31,9 @@ options:
       - Version of the Butane specification to use.
     type: str
     required: true
-  disk:
+  target_device:
     description:
-      - Target disk device for FCOS installation (e.g., /dev/sda).
+      - Target block device for FCOS installation (e.g., /dev/sda, /dev/nvme0n1).
     type: str
     required: true
   templates:
@@ -61,7 +61,7 @@ EXAMPLES = r"""
 - name: Install Fedora CoreOS with custom configuration
   kudato.fcos.install:
     butane_version: "1.6.0"
-    disk: "/dev/sda"
+    target_device: "/dev/sda"
     templates:
       - "{{ playbook_dir }}/templates/base.bu"
       - "{{ playbook_dir }}/templates/network.bu"
@@ -69,7 +69,7 @@ EXAMPLES = r"""
 - name: Force reinstall Fedora CoreOS
   kudato.fcos.install:
     butane_version: "1.6.0"
-    disk: "/dev/sda"
+    target_device: "/dev/sda"
     templates:
       - "{{ playbook_dir }}/templates/base.bu"
     force: true
@@ -118,7 +118,7 @@ storage:
         inline: |
           {
             "installed_at": "{{ installed_at }}",
-            "installed_to": "{{ disk }}"
+            "installed_to": "{{ installed_to }}"
           }
 ignition:
   config:
@@ -130,45 +130,24 @@ ignition:
 
 
 class IgnitionBuilder:
-    """Builder for Ignition configuration files from Butane templates.
-
-    This class manages the rendering of Butane templates into Ignition
-    configuration files, including template processing, butane compilation,
-    and validation.
-
-    Attributes:
-        file_manager: Temporary file manager for intermediate files.
-        ignition_files: List of generated ignition file names.
-    """
+    """Builder for Ignition configuration files from Butane templates."""
 
     def __init__(self) -> None:
-        """Initialize the Ignition builder with a temporary file manager."""
         self.file_manager = TempFileManager(prefix="fcos_install_")
         self.ignition_files: list[str] = []
 
     def render(
         self,
         templates: list[str],
-        variables: dict[str, Any] | None = None,
+        variables: dict[str, Any],
+        installed_to: str,
     ) -> str:
-        """Render Butane templates into a merged Ignition configuration.
-
-        Args:
-            templates: List of paths to Butane template files.
-            variables: Variables to pass to the templates.
-
-        Returns:
-            Path to the final merged Ignition configuration file.
-
-        Raises:
-            AnsibleActionFail: If butane compilation or validation fails.
-        """
-        variables = variables or {}
+        """Render Butane templates into a merged Ignition configuration."""
         display.v(f"Starting butane generation with {len(templates)} template(s)")
 
         for template in templates:
-            full_path = self._render_template(template, variables=variables)
-            self.ignition_files.append(os.path.basename(full_path))
+            ign_path = self._render_template(template, variables)
+            self.ignition_files.append(os.path.basename(ign_path))
 
         return self._render_template(
             self.file_manager.write_to_file(BUTANE_BASE_TEMPLATE, suffix=".bu"),
@@ -176,6 +155,7 @@ class IgnitionBuilder:
                 "ignition_files": self.ignition_files,
                 "metadata_file": METADATA_FILE,
                 "installed_at": datetime.now(timezone.utc).isoformat(),
+                "installed_to": installed_to,
                 **variables,
             },
         )
@@ -183,150 +163,90 @@ class IgnitionBuilder:
     def _render_template(
         self,
         template_path: str,
-        variables: dict[str, Any] | None = None,
+        variables: dict[str, Any],
     ) -> str:
-        """Render a single Butane template and compile to Ignition.
-
-        Args:
-            template_path: Path to the Butane template file.
-            variables: Variables to pass to the template.
-
-        Returns:
-            Path to the generated Ignition configuration file.
-
-        Raises:
-            AnsibleActionFail: If butane compilation or validation fails.
-        """
-        variables = variables or {}
+        """Render a Butane template to Ignition configuration."""
         env = Environment()
-
-        # Add custom filters
         env.filters["b64encode"] = lambda x: base64.b64encode(x.encode()).decode()
         env.filters["yaml"] = lambda x: yaml.safe_load(x) if isinstance(x, str) else x
 
-        # Read and render template
         with open(template_path, "r", encoding="utf-8") as f:
             template = env.from_string(f.read())
-        rendered_content = template.render(**variables)
+        rendered = template.render(**variables)
 
-        display.v(f"Writing butane template to: {os.path.basename(template_path)}")
-        display.vvv(f"Rendered content:\n{rendered_content}")
-        bu_file_path = self.file_manager.write_to_file(rendered_content, suffix=".bu")
+        display.v(f"Compiling template: {os.path.basename(template_path)}")
+        display.vvv(f"Rendered content:\n{rendered}")
 
-        # Compile with butane
-        ign_file_path = self.file_manager.write_to_file("", suffix=".ign")
+        bu_file = self.file_manager.write_to_file(rendered, suffix=".bu")
+        ign_file = self.file_manager.write_to_file("", suffix=".ign")
+
         result = subprocess.run(
             [
                 "butane",
                 "--strict",
                 "--files-dir",
                 self.file_manager.temp_dir,
-                bu_file_path,
+                bu_file,
                 "-o",
-                ign_file_path,
+                ign_file,
             ],
             capture_output=True,
             text=True,
             check=False,
         )
-
         if result.returncode != 0:
             raise AnsibleActionFail(
-                f"Butane failed with exit code {result.returncode}:\n"
-                f"stdout: {result.stdout}\n"
-                f"stderr: {result.stderr}"
+                f"Butane compilation failed:\n"
+                f"stdout: {result.stdout}\nstderr: {result.stderr}"
             )
 
-        # Validate ignition file
-        display.v(f"Validating ignition file: {os.path.basename(ign_file_path)}")
-        validate_result = subprocess.run(
-            ["ignition-validate", ign_file_path],
+        result = subprocess.run(
+            ["ignition-validate", ign_file],
             capture_output=True,
             text=True,
             check=False,
         )
-
-        if validate_result.returncode != 0:
+        if result.returncode != 0:
             raise AnsibleActionFail(
-                f"Ignition validation failed with exit code {validate_result.returncode}:\n"
-                f"stdout: {validate_result.stdout}\n"
-                f"stderr: {validate_result.stderr}"
+                f"Ignition validation failed:\n"
+                f"stdout: {result.stdout}\nstderr: {result.stderr}"
             )
 
-        return ign_file_path
+        return ign_file
 
     def cleanup(self) -> None:
-        """Clean up all temporary files and directories."""
+        """Clean up temporary files."""
         self.file_manager.cleanup()
 
 
 class ActionModule(ActionBase):
-    """Action plugin for installing Fedora CoreOS.
-
-    This plugin handles the complete FCOS installation workflow:
-    rendering Butane templates, generating Ignition configuration,
-    transferring files, and executing the installation command.
-    """
+    """Action plugin for installing Fedora CoreOS."""
 
     def _is_installed(self) -> bool:
-        """Check if FCOS is already installed by checking metadata file.
-
-        Returns:
-            True if metadata file exists, False otherwise.
-        """
+        """Check if FCOS is already installed."""
         result = self._low_level_execute_command(
             f"test -f {shlex.quote(METADATA_FILE)}"
         )
         return result.get("rc", 1) == 0
 
-    def _install(self, ignition_file: str, disk: str) -> None:
-        """Install Fedora CoreOS on the target disk.
+    def _install(self, ignition_file: str, target_device: str) -> None:
+        """Install Fedora CoreOS on the target device."""
+        remote_path = f"/tmp/ansible_ignition_{os.getpid()}.ign"
+        self._connection.put_file(ignition_file, remote_path)
 
-        Args:
-            ignition_file: Path to the local Ignition configuration file.
-            disk: Target disk device path.
-
-        Raises:
-            AnsibleActionFail: If file transfer or installation fails.
-        """
-        remote_ignition_path = os.path.join(
-            "/tmp",
-            f"ansible_ignition_{os.getpid()}_{os.path.basename(ignition_file)}",
-        )
-
-        # Transfer ignition file to remote host
-        self._connection.put_file(ignition_file, remote_ignition_path)
-
-        # Execute installation command
-        install_cmd = (
+        result = self._low_level_execute_command(
             f"sudo coreos-installer install "
-            f"--ignition-file {shlex.quote(remote_ignition_path)} {shlex.quote(disk)}"
+            f"--ignition-file {shlex.quote(remote_path)} {shlex.quote(target_device)}",
+            sudoable=True,
         )
-
-        result = self._low_level_execute_command(install_cmd, sudoable=True)
 
         if result.get("rc", 1) != 0:
             raise AnsibleActionFail(
-                f"FCOS installation error: {result.get('stderr', 'Unknown error')}"
+                f"FCOS installation failed: {result.get('stderr', 'Unknown error')}"
             )
 
-    def _get_task_arg(
-        self,
-        name: str,
-        default: Any = None,
-    ) -> Any:
-        """Get a task argument with validation.
-
-        Args:
-            name: Name of the argument to retrieve.
-            default: Default value if argument is not provided.
-
-        Returns:
-            The argument value or default.
-
-        Raises:
-            AnsibleOptionsError: If required argument is missing.
-        """
+    def _get_task_arg(self, name: str, default: Any = None) -> Any:
+        """Get a task argument with validation."""
         value = self._task.args.get(name)
         if value is None and default is None:
             raise AnsibleOptionsError(f"Required parameter '{name}' is missing")
@@ -337,63 +257,46 @@ class ActionModule(ActionBase):
         tmp: str | None = None,
         task_vars: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Execute the FCOS installation action.
-
-        Args:
-            tmp: Temporary directory path (deprecated, unused).
-            task_vars: Dictionary of task variables.
-
-        Returns:
-            Result dictionary with changed status and message.
-
-        Raises:
-            AnsibleActionFail: If any step of the installation fails.
-        """
+        """Execute the FCOS installation action."""
         result = super().run(tmp, task_vars) or {}
-        result.update({
-            "changed": False,
-            "msg": "",
-        })
+        result.update({"changed": False, "msg": ""})
 
-        # Get task arguments
         butane_version: str = self._get_task_arg("butane_version")
-        disk: str = self._get_task_arg("disk")
+        target_device: str = self._get_task_arg("target_device")
         templates: list[str] = self._get_task_arg("templates", [])
         force: bool = self._get_task_arg("force", False)
 
-        # Check if already installed
-        if not force and self._is_installed():
-            result["msg"] = "FCOS is already installed, skipping (use force=true to reinstall)"
+        if force is not True and self._is_installed():
+            result["msg"] = "FCOS is already installed (use force=true to reinstall)"
             return result
 
-        # Prepare template variables
         template_vars = (task_vars or {}).copy()
         template_vars["butane_version"] = butane_version
-        template_vars["disk"] = disk
 
         builder: IgnitionBuilder | None = None
 
         try:
             builder = IgnitionBuilder()
 
-            # Render ignition configuration
-            ignition_file = builder.render(templates, variables=template_vars)
+            ignition_file = builder.render(
+                templates,
+                variables=template_vars,
+                installed_to=target_device,
+            )
             display.v(f"Ignition file generated: {ignition_file}")
 
-            # Install FCOS (skip in check mode)
             if self._play_context.check_mode:
-                result["msg"] = f"Would install Fedora CoreOS on {disk}"
+                result["msg"] = f"Would install Fedora CoreOS on {target_device}"
             else:
-                self._install(ignition_file, disk)
-                result["msg"] = f"Fedora CoreOS installed on {disk}"
+                self._install(ignition_file, target_device)
+                result["msg"] = f"Fedora CoreOS installed on {target_device}"
 
             result["changed"] = True
 
         except AnsibleError:
             raise
         except Exception as e:
-            raise AnsibleActionFail(f"Error during FCOS installation: {e}") from e
-
+            raise AnsibleActionFail(f"FCOS installation error: {e}") from e
         finally:
             if builder:
                 builder.cleanup()
