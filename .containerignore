@@ -1,0 +1,21 @@
+# Ignore local development files
+.venv/
+.git/
+.github/
+.gitignore
+*.pyc
+__pycache__/
+*.egg-info/
+.mypy_cache/
+.pytest_cache/
+.tox/
+
+# Test environment
+tests/.testenv/
+tests/.iso/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
