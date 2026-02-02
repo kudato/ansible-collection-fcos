@@ -2,50 +2,87 @@
 
 Ansible collection for bootstrapping and managing Fedora CoreOS systems.
 
-## Plugins
-
-### install
-
-Action plugin for installing Fedora CoreOS with Ignition configuration.
-
-**Requirements:**
-- `butane`, `ignition-validate` (local)
-- `coreos-installer` (remote)
-
 ## Installation
 
 ```bash
 ansible-galaxy collection install kudato.fcos
 ```
 
-## Usage
+## Documentation
+
+### Plugins
+
+| Plugin | Description |
+|--------|-------------|
+| [install](docs/plugins/install.md) | Install Fedora CoreOS with Ignition configuration |
+
+### Roles
+
+| Role | Description |
+|------|-------------|
+| [install](roles/install/README.md) | Complete FCOS installation with predefined Butane templates |
+
+## Quick Start
+
+### Using the install role (recommended)
+
+The `install` role provides a complete solution with predefined templates for system configuration:
 
 ```yaml
-- name: Install Fedora CoreOS with custom configuration
+# playbook.yml
+- name: Install Fedora CoreOS
+  hosts: all
+  gather_facts: false
+  roles:
+    - kudato.fcos.install
+```
+
+```yaml
+# host_vars/server1.yml
+system_disk: /dev/sda
+wipe_system_disk: true
+
+core_user_ssh_keys:
+  - "ssh-ed25519 AAAA... admin@example.com"
+
+ansible_user_ssh_keys:
+  - "ssh-ed25519 AAAA... ansible@example.com"
+
+network_interfaces:
+  - name: eth0
+    type: wan
+    dhcp: true
+```
+
+```bash
+ansible-playbook -i inventory.yml playbook.yml
+```
+
+See [install role documentation](roles/install/README.md) for all available variables.
+
+### Using plugins directly
+
+For custom installations without the role:
+
+```yaml
+- name: Install Fedora CoreOS with custom templates
   kudato.fcos.install:
     butane_version: "1.6.0"
-    disk: "/dev/sda"
+    target_device: "/dev/sda"
     templates:
       - "{{ playbook_dir }}/templates/base.bu"
       - "{{ playbook_dir }}/templates/network.bu"
-
-- name: Force reinstall Fedora CoreOS
-  kudato.fcos.install:
-    butane_version: "1.6.0"
-    disk: "/dev/sda"
-    templates:
-      - "{{ playbook_dir }}/templates/base.bu"
-    force: true
 ```
 
-## Parameters
+## Requirements
 
-| Parameter | Required | Default | Description |
-|-----------|----------|---------|-------------|
-| `butane_version` | yes | - | Version of the Butane specification |
-| `disk` | yes | - | Target disk device (e.g., `/dev/sda`) |
-| `templates` | no | `[]` | List of Butane template files |
-| `force` | no | `false` | Force reinstallation |
+**Locally (where Ansible runs):**
+- `butane` — for compiling Butane to Ignition
+- `ignition-validate` — for validating Ignition configuration
+
+**On target host:**
+- `coreos-installer` — for installing FCOS to disk
+- Booted from Fedora CoreOS Live ISO
 
 ## Contributing
 
