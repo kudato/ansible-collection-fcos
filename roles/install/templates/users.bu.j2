@@ -1,0 +1,25 @@
+variant: fcos
+version: "{{ butane_version }}"
+
+passwd:
+  groups:
+    - name: ansible
+      gid: 1001
+
+  users:
+    - name: core
+      ssh_authorized_keys:
+{% for key in core_user_ssh_keys %}
+        - "{{ key }}"
+{% endfor %}
+
+    - name: ansible
+      uid: 1001
+      primary_group: ansible
+      groups:
+        - wheel
+        - systemd-journal
+      ssh_authorized_keys:
+{% for key in ansible_user_ssh_keys %}
+        - "{{ key }}"
+{% endfor %}

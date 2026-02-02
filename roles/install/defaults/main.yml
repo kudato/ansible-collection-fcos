@@ -1,0 +1,173 @@
+---
+# =============================================================================
+# Templates
+# =============================================================================
+# Default Butane templates (can be fully replaced)
+fcos_templates:
+  - "{{ role_path }}/templates/users.bu.j2"
+  - "{{ role_path }}/templates/ssh.bu.j2"
+  - "{{ role_path }}/templates/system.bu.j2"
+  - "{{ role_path }}/templates/updates.bu.j2"
+  - "{{ role_path }}/templates/network.bu.j2"
+  - "{{ role_path }}/templates/firewall.bu.j2"
+  - "{{ role_path }}/templates/storage.bu.j2"
+  - "{{ role_path }}/templates/podman.bu.j2"
+
+# Additional templates to append (use for extending defaults)
+fcos_extra_templates: []
+
+# =============================================================================
+# Installation
+# =============================================================================
+force: false
+butane_version: "1.6.0"
+
+# =============================================================================
+# Users
+# =============================================================================
+core_user_ssh_keys: []     # <required>
+ansible_user_ssh_keys: []  # <required>
+
+# =============================================================================
+# SSH
+# =============================================================================
+ssh_port: 22
+
+# =============================================================================
+# System
+# =============================================================================
+timezone: UTC
+ip_forward: false
+
+# Journal settings
+journal_max_size: 500M
+journal_max_file_size: 50M
+journal_retention: 1month
+
+# Process limits
+max_open_files_soft: 65535
+max_open_files_hard: 65535
+max_processes_soft: 65535
+max_processes_hard: 65535
+
+# =============================================================================
+# Sysctl: Network buffers (10-network.conf)
+# =============================================================================
+net_rmem_max: 16777216
+net_wmem_max: 16777216
+tcp_rmem: "4096 87380 16777216"
+tcp_wmem: "4096 87380 16777216"
+netdev_max_backlog: 5000
+somaxconn: 4096
+tcp_max_syn_backlog: 4096
+ip_local_port_range: "10240 65535"
+
+# =============================================================================
+# Sysctl: TCP tuning (20-tcp-tuning.conf)
+# =============================================================================
+# Congestion control
+tcp_congestion_control: bbr
+default_qdisc: fq
+
+# TIME_WAIT optimization
+tcp_max_tw_buckets: 262144
+tcp_tw_reuse: 1
+tcp_fin_timeout: 15
+
+# Keepalive
+tcp_keepalive_time: 600
+tcp_keepalive_intvl: 30
+tcp_keepalive_probes: 5
+
+# Performance
+tcp_slow_start_after_idle: 0
+tcp_mtu_probing: 1
+tcp_fastopen: 3
+
+# =============================================================================
+# Sysctl: Security (30-security.conf)
+# =============================================================================
+# Disable IPv6 Router Advertisements (set true only for static IPv6 config)
+disable_ipv6_ra: false
+
+# =============================================================================
+# Sysctl: VM/Memory (40-vm.conf)
+# =============================================================================
+vm_swappiness: 10
+vm_dirty_ratio: 40
+vm_dirty_background_ratio: 10
+fs_file_max: 2097152
+
+# Kernel stability
+kernel_panic_timeout: 10
+
+# =============================================================================
+# Updates (Zincati)
+# =============================================================================
+maintenance_window_days: '["Sun"]'
+maintenance_window_start: "03:00"
+maintenance_window_length: 60
+
+# =============================================================================
+# Network
+# =============================================================================
+network_interfaces: []
+# Example:
+#   - name: eth0
+#     type: wan                  # wan | lan
+#     mac_address: "00:11:22:33:44:55"
+#     default_route: true        # optional, default: true (use as default gateway)
+#
+#   - name: eth1
+#     type: lan
+#     mac_address: "00:11:22:33:44:56"
+#     static_ip: "192.168.1.1"
+#     network_prefix: 24
+#     gateway: "192.168.1.254"   # optional for lan
+#     dns_servers:               # optional
+#       - "8.8.8.8"
+
+# =============================================================================
+# Firewall
+# =============================================================================
+firewall_allow_icmp: true
+
+# =============================================================================
+# Storage
+# =============================================================================
+# system_disk: <required> - target device for FCOS installation
+#
+# System disk options:
+#   wipe_system_disk: false  - wipe partition table
+#   swap_size: 0             - swap size in MiB (0 = disabled)
+#
+# Example:
+#   system_disk: /dev/vda
+#   wipe_system_disk: true
+#   swap_size: 2048
+
+wipe_system_disk: false
+swap_size: 0
+
+# Additional disks configuration
+additional_disks: []
+# Example:
+#   - device: /dev/vdb
+#     wipe_table: true
+#     partitions:
+#       - label: data
+#         size_mib: 0              # 0 = use all remaining space
+#         mount_path: /var/data    # optional - where to mount
+#         format: xfs              # optional - filesystem type (required if mount_path set)
+#
+#   - device: /dev/vdc
+#     wipe_table: true
+#     partitions:
+#       - label: backup
+#         size_mib: 51200          # 50 GB
+#         mount_path: /var/backup
+#         format: xfs
+#       - label: logs
+#         size_mib: 0
+#         mount_path: /var/log/external
+#         format: ext4

@@ -1,0 +1,94 @@
+{%- set wan_interfaces = network_interfaces | default([]) | selectattr('type', 'equalto', 'wan') | map(attribute='name') | list -%}
+{%- set lan_interfaces = network_interfaces | default([]) | selectattr('type', 'equalto', 'lan') | map(attribute='name') | list -%}
+variant: fcos
+version: "{{ butane_version }}"
+
+systemd:
+  units:
+    - name: nftables.service
+      enabled: true
+
+storage:
+  directories:
+    - path: /etc/nftables.d
+      mode: 0755
+
+  files:
+    - path: /etc/sysconfig/nftables.conf
+      mode: 0644
+      overwrite: true
+      contents:
+        inline: |
+          flush ruleset
+
+          table inet filter {
+            chain input {
+              type filter hook input priority 0; policy drop;
+
+              # Loopback
+              iif "lo" accept
+
+              # Connection tracking
+              ct state established,related accept
+              ct state invalid drop
+{% if firewall_allow_icmp | default(true) %}
+
+              # ICMP
+              ip protocol icmp accept
+              ip6 nexthdr icmpv6 accept
+{% endif %}
+
+              # SSH
+              tcp dport {{ ssh_port }} accept
+
+              # DHCP client on dhcp-enabled interfaces
+{% for iface in network_interfaces | default([]) %}
+{% if iface.dhcp | default(false) %}
+              iifname "{{ iface.name }}" udp sport 67 udp dport 68 accept
+              iifname "{{ iface.name }}" udp sport 547 udp dport 546 accept
+{% endif %}
+{% endfor %}
+{% if lan_interfaces | length > 0 %}
+
+              # LAN interfaces - allow all inbound traffic
+{% for iface in lan_interfaces %}
+              iifname "{{ iface }}" accept
+{% endfor %}
+{% endif %}
+            }
+
+            chain forward {
+              type filter hook forward priority 0; policy drop;
+
+              # Connection tracking
+              ct state established,related accept
+              ct state invalid drop
+{% if lan_interfaces | length > 1 %}
+
+              # Traffic between LAN interfaces
+{% for src in lan_interfaces %}
+{% for dst in lan_interfaces %}
+{% if src != dst %}
+              iifname "{{ src }}" oifname "{{ dst }}" accept
+{% endif %}
+{% endfor %}
+{% endfor %}
+{% endif %}
+{% if lan_interfaces | length > 0 and wan_interfaces | length > 0 %}
+
+              # LAN to WAN (internet access)
+{% for lan in lan_interfaces %}
+{% for wan in wan_interfaces %}
+              iifname "{{ lan }}" oifname "{{ wan }}" accept
+{% endfor %}
+{% endfor %}
+{% endif %}
+            }
+
+            chain output {
+              type filter hook output priority 0; policy accept;
+            }
+          }
+
+          # Include additional rules
+          include "/etc/nftables.d/*.nft"

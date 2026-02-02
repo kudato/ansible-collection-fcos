@@ -1,0 +1,30 @@
+variant: fcos
+version: "{{ butane_version }}"
+
+systemd:
+  units:
+    - name: docker.service
+      mask: true
+    - name: docker.socket
+      mask: true
+
+storage:
+  links:
+    - path: /usr/local/bin/docker
+      target: /usr/bin/podman
+      overwrite: true
+
+  files:
+    - path: /etc/containers/registries.conf
+      mode: 0644
+      overwrite: true
+      contents:
+        inline: |
+          short-name-mode = "disabled"
+
+    - path: /etc/containers/registries.conf.d/000-shortnames.conf
+      mode: 0644
+      overwrite: true
+      contents:
+        inline: |
+          [aliases]

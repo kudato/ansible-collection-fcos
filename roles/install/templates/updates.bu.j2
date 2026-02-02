@@ -1,0 +1,14 @@
+variant: fcos
+version: "{{ butane_version }}"
+storage:
+  files:
+    - path: /etc/zincati/config.d/55-updates-strategy.toml
+      overwrite: true
+      contents:
+        inline: |
+          [updates]
+          strategy = "periodic"
+          [[updates.periodic.window]]
+          days = {{ maintenance_window_days }}
+          start_time = "{{ maintenance_window_start }}"
+          length_minutes = {{ maintenance_window_length }}

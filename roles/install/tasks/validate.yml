@@ -1,0 +1,38 @@
+---
+- name: Validate system disk
+  ansible.builtin.assert:
+    that:
+      - system_disk is defined
+      - system_disk | length > 0
+    fail_msg: "system_disk must be defined"
+
+- name: Validate SSH keys are provided
+  ansible.builtin.assert:
+    that:
+      - core_user_ssh_keys | length > 0
+      - ansible_user_ssh_keys | length > 0
+    fail_msg: "SSH keys must be provided for both core and ansible users"
+
+- name: Validate network interfaces configuration
+  ansible.builtin.assert:
+    that:
+      - item.name is defined
+      - item.type is defined
+      - item.type in ['wan', 'lan']
+      - item.dhcp | default(false) or (item.static_ip is defined and item.network_prefix is defined)
+    fail_msg: "Network interface {{ item.name | default('unknown') }}: type must be 'wan' or 'lan', and must have dhcp=true or static_ip/network_prefix"
+  loop: "{{ network_interfaces | default([]) }}"
+  when: network_interfaces | default([]) | length > 0
+
+- name: Validate maintenance window days format
+  vars:
+    valid_days: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+    configured_days: "{{ maintenance_window_days | from_json }}"
+  ansible.builtin.assert:
+    that:
+      - configured_days | length > 0
+      - configured_days | difference(valid_days) | length == 0
+    fail_msg: >-
+      Invalid maintenance_window_days: {{ maintenance_window_days }}.
+      Valid values are: Mon, Tue, Wed, Thu, Fri, Sat, Sun.
+      Example: '["Sat", "Sun"]'

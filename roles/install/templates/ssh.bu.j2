@@ -1,0 +1,55 @@
+variant: fcos
+version: "{{ butane_version }}"
+
+storage:
+  files:
+    - path: /etc/ssh/sshd_config
+      mode: 0644
+      overwrite: true
+      contents:
+        inline: |
+          Port {{ ssh_port }}
+          PermitRootLogin no
+          PasswordAuthentication no
+          PubkeyAuthentication yes
+          PermitEmptyPasswords no
+          KbdInteractiveAuthentication no
+          KerberosAuthentication no
+          GSSAPIAuthentication no
+          UsePAM yes
+          
+          AuthorizedKeysFile .ssh/authorized_keys .ssh/authorized_keys.d/*
+          AllowUsers core ansible
+          MaxAuthTries 3
+          MaxSessions 10
+          ClientAliveInterval 300
+          ClientAliveCountMax 2
+          LoginGraceTime 60
+          
+          X11Forwarding no
+          AllowTcpForwarding yes
+          GatewayPorts no
+          PermitTunnel no
+          
+          Compression no
+          UseDNS no
+          StrictModes yes
+          
+          SyslogFacility AUTH
+          LogLevel INFO
+          
+          Ciphers chacha20-poly1305@openssh.com,aes256-gcm@openssh.com
+          MACs hmac-sha2-256-etm@openssh.com,hmac-sha2-512-etm@openssh.com
+          KexAlgorithms curve25519-sha256,curve25519-sha256@libssh.org
+          
+          HostKeyAlgorithms ssh-ed25519
+          PubkeyAcceptedAlgorithms ssh-ed25519
+          
+          Subsystem sftp /usr/libexec/openssh/sftp-server
+          
+          HostbasedAuthentication no
+          IgnoreRhosts yes
+          IgnoreUserKnownHosts yes
+          PrintLastLog yes
+          PrintMotd no
+          TCPKeepAlive yes

@@ -1,0 +1,11 @@
+---
+- name: Validate configuration
+  ansible.builtin.include_tasks: validate.yml
+
+- name: Install Fedora CoreOS
+  kudato.fcos.install:
+    butane_version: "{{ butane_version }}"
+    target_device: "{{ system_disk }}"
+    force: "{{ force }}"
+    templates: "{{ fcos_templates + fcos_extra_templates }}"
+  register: install_result

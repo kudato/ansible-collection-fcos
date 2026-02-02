@@ -1,0 +1,51 @@
+variant: fcos
+version: "{{ butane_version }}"
+
+storage:
+  disks:
+    - device: /dev/disk/by-id/coreos-boot-disk
+      wipe_table: {{ wipe_system_disk | default(false) }}
+      partitions:
+        - label: BIOS-BOOT
+          size_mib: 1
+        - label: EFI-SYSTEM
+          size_mib: 127
+        - label: boot
+          size_mib: 384
+        - label: root
+          size_mib: 8192
+{% if swap_size | default(0) > 0 %}
+        - label: swap
+          size_mib: {{ swap_size }}
+{% endif %}
+        - label: var
+          size_mib: 0
+{% for disk in additional_disks | default([]) %}
+    - device: {{ disk.device }}
+      wipe_table: {{ disk.wipe_table | default(false) }}
+      partitions:
+{% for partition in disk.partitions %}
+        - label: {{ partition.label }}
+          size_mib: {{ partition.size_mib | default(0) }}
+{% endfor %}
+{% endfor %}
+  filesystems:
+    - path: /var
+      device: /dev/disk/by-partlabel/var
+      format: xfs
+      with_mount_unit: true
+{% if swap_size | default(0) > 0 %}
+    - device: /dev/disk/by-partlabel/swap
+      format: swap
+      with_mount_unit: true
+{% endif %}
+{% for disk in additional_disks | default([]) %}
+{% for partition in disk.partitions %}
+{% if partition.mount_path is defined and partition.format is defined %}
+    - path: {{ partition.mount_path }}
+      device: /dev/disk/by-partlabel/{{ partition.label }}
+      format: {{ partition.format }}
+      with_mount_unit: true
+{% endif %}
+{% endfor %}
+{% endfor %}

@@ -1,0 +1,46 @@
+variant: fcos
+version: "{{ butane_version }}"
+{% if network_interfaces | default([]) | length > 0 %}
+
+storage:
+  files:
+    - path: /etc/udev/rules.d/10-network.rules
+      mode: 0644
+      overwrite: true
+      contents:
+        inline: |
+{% for interface in network_interfaces %}
+{% if interface.mac_address is defined and interface.mac_address != "" %}
+          SUBSYSTEM=="net", ACTION=="add", ATTR{address}=="{{ interface.mac_address | lower }}", NAME="{{ interface.name }}"
+{% endif %}
+{% endfor %}
+
+{% for interface in network_interfaces %}
+    - path: /etc/NetworkManager/system-connections/{{ interface.name }}.nmconnection
+      mode: 0600
+      overwrite: true
+      contents:
+        inline: |
+          [connection]
+          id={{ interface.name }}
+          type=ethernet
+          interface-name={{ interface.name }}
+          [ipv4]
+{% if interface.dhcp | default(false) %}
+          method=auto
+          never-default={{ 'false' if interface.default_route | default(true) else 'true' }}
+{% else %}
+          address1={{ interface.static_ip }}/{{ interface.network_prefix }}{% if interface.gateway is defined %},{{ interface.gateway }}{% endif %}
+
+{% if interface.dns_servers | default([]) | length > 0 %}
+          dns={{ interface.dns_servers | join(';') }};
+{% endif %}
+          dns-search=
+          may-fail=false
+          method=manual
+          never-default={{ 'false' if interface.default_route | default(true) else 'true' }}
+{% endif %}
+          [ipv6]
+          method=ignore
+{% endfor %}
+{% endif %}
