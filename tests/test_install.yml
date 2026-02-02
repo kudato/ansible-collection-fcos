@@ -1,0 +1,133 @@
+---
+# =============================================================================
+# FCOS Installation Test
+# =============================================================================
+# Runs kudato.fcos.install role on target VMs.
+#
+# Usage:
+#   make install              Run on all hosts
+#   make install VM=min       Run on specific host
+#
+# Validation tests (localhost):
+#   make validate             Run validation tests only
+# =============================================================================
+
+# =============================================================================
+# Validation Tests (localhost) - Negative tests
+# =============================================================================
+# Tests that role correctly fails with meaningful errors on invalid input.
+# =============================================================================
+
+- name: Validation tests
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tags: [validate, never]
+
+  vars:
+    _valid_ssh_keys:
+      - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITest test@test"
+    _test_results: []
+
+  tasks:
+    - name: "⚠️  NEGATIVE TESTS"
+      ansible.builtin.debug:
+        msg: "Testing validation error handling..."
+
+    # Test 1: Missing system_disk
+    - name: "test | missing system_disk"
+      block:
+        - ansible.builtin.include_role:
+            name: kudato.fcos.install
+            tasks_from: validate.yml
+          vars:
+            core_user_ssh_keys: "{{ _valid_ssh_keys }}"
+            ansible_user_ssh_keys: "{{ _valid_ssh_keys }}"
+        - ansible.builtin.fail:
+            msg: "Should have failed"
+      rescue:
+        - ansible.builtin.assert:
+            that: "'system_disk' in ansible_failed_result.msg | default('')"
+            quiet: true
+
+    # Test 2: Empty SSH keys
+    - name: "test | empty SSH keys"
+      block:
+        - ansible.builtin.include_role:
+            name: kudato.fcos.install
+            tasks_from: validate.yml
+          vars:
+            system_disk: /dev/vda
+            core_user_ssh_keys: []
+            ansible_user_ssh_keys: []
+        - ansible.builtin.fail:
+            msg: "Should have failed"
+      rescue:
+        - ansible.builtin.assert:
+            that: "'SSH keys' in ansible_failed_result.msg | default('')"
+            quiet: true
+
+    # Test 3: Invalid interface type
+    - name: "test | invalid interface type"
+      block:
+        - ansible.builtin.include_role:
+            name: kudato.fcos.install
+            tasks_from: validate.yml
+          vars:
+            system_disk: /dev/vda
+            core_user_ssh_keys: "{{ _valid_ssh_keys }}"
+            ansible_user_ssh_keys: "{{ _valid_ssh_keys }}"
+            network_interfaces:
+              - name: eth0
+                type: invalid_type
+                dhcp: true
+        - ansible.builtin.fail:
+            msg: "Should have failed"
+      rescue:
+        - ansible.builtin.assert:
+            that: ansible_failed_result is defined
+            quiet: true
+
+    # Test 4: Invalid maintenance days
+    - name: "test | invalid maintenance_window_days"
+      block:
+        - ansible.builtin.include_role:
+            name: kudato.fcos.install
+            tasks_from: validate.yml
+          vars:
+            system_disk: /dev/vda
+            core_user_ssh_keys: "{{ _valid_ssh_keys }}"
+            ansible_user_ssh_keys: "{{ _valid_ssh_keys }}"
+            maintenance_window_days: '["Monday", "Tuesday"]'
+        - ansible.builtin.fail:
+            msg: "Should have failed"
+      rescue:
+        - ansible.builtin.assert:
+            that: "'maintenance_window_days' in ansible_failed_result.msg | default('')"
+            quiet: true
+
+    - name: "✅ VALIDATION OK"
+      ansible.builtin.debug:
+        msg: "4/4 negative tests passed"
+
+# =============================================================================
+# Installation Test (VMs)
+# =============================================================================
+
+- name: Install FCOS
+  hosts: vms
+  gather_facts: false
+
+  pre_tasks:
+    - name: "🔧 Installing on {{ inventory_hostname }}"
+      ansible.builtin.debug:
+        msg: "disk={{ system_disk }}"
+      run_once: true
+
+  roles:
+    - role: kudato.fcos.install
+
+  post_tasks:
+    - name: "✅ INSTALLED {{ inventory_hostname }}"
+      ansible.builtin.debug:
+        msg: "Ready for reboot"

@@ -1,0 +1,28 @@
+---
+# =============================================================================
+# Test Inventory
+# =============================================================================
+# localhost - Validation tests (no VM needed)
+# min       - Basic installation (1 disk, 1 network)
+# full      - Complete feature coverage (multi-disk, multi-network, all sysctl)
+# =============================================================================
+
+all:
+  hosts:
+    localhost:
+      ansible_connection: local
+
+  children:
+    vms:
+      hosts:
+        min:
+          ansible_host: host.containers.internal
+          ansible_port: 3021
+          ansible_user: core
+          ansible_ssh_common_args: '-o StrictHostKeyChecking=no -o UserKnownHostsFile=/ansible/tests/.testenv/known_hosts'
+
+        full:
+          ansible_host: host.containers.internal
+          ansible_port: 3022
+          ansible_user: core
+          ansible_ssh_common_args: '-o StrictHostKeyChecking=no -o UserKnownHostsFile=/ansible/tests/.testenv/known_hosts'

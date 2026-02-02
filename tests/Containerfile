@@ -1,0 +1,38 @@
+# Test container for ansible-collection-fcos
+# Contains only dependencies - collection is mounted at runtime
+FROM python:3.14-slim
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    openssh-client \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install butane and ignition-validate
+ARG BUTANE_VERSION=0.26.0
+ARG IGNITION_VERSION=2.25.1
+
+RUN ARCH=$(uname -m) && \
+    curl -sfL -o /usr/local/bin/butane \
+    "https://github.com/coreos/butane/releases/download/v${BUTANE_VERSION}/butane-${ARCH}-unknown-linux-gnu" && \
+    chmod +x /usr/local/bin/butane && \
+    butane --version && \
+    curl -sfL -o /usr/local/bin/ignition-validate \
+    "https://github.com/coreos/ignition/releases/download/v${IGNITION_VERSION}/ignition-validate-${ARCH}-linux" && \
+    chmod +x /usr/local/bin/ignition-validate && \
+    ignition-validate --version
+
+# Install ansible
+RUN pip install --no-cache-dir ansible-core==2.20.1
+
+# Create ansible directories
+RUN mkdir -p /ansible/collections/ansible_collections
+
+# Set working directory
+WORKDIR /ansible
+
+# Set environment
+ENV ANSIBLE_COLLECTIONS_PATH=/ansible/collections
+ENV ANSIBLE_HOST_KEY_CHECKING=False
+
+ENTRYPOINT ["ansible-playbook"]

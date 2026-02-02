@@ -1,0 +1,305 @@
+---
+# =============================================================================
+# FCOS Installation Verification
+# =============================================================================
+# Compact verification with summary output.
+# Uses only 'raw' module - no Python required on target (CoreOS).
+#
+# Usage:
+#   make verify              Verify all hosts
+#   make verify VM=min       Verify specific host
+# =============================================================================
+
+- name: Verify FCOS installation
+  hosts: vms
+  gather_facts: false
+
+  tasks:
+    # =========================================================================
+    # System checks
+    # =========================================================================
+    - name: "system"
+      block:
+        - name: "system | collect"
+          ansible.builtin.raw: |
+            echo "timezone=$(timedatectl show --property=Timezone --value)"
+            echo "hostname=$(hostname)"
+            echo "ip_forward=$(sysctl -n net.ipv4.ip_forward)"
+            [ -f /etc/systemd/journald.conf.d/10-logging.conf ] && \
+              echo "journal_conf=$(grep SystemMaxUse /etc/systemd/journald.conf.d/10-logging.conf | cut -d= -f2)" || \
+              echo "journal_conf="
+            echo "ulimit_soft=$(ulimit -Sn)"
+          register: _sys
+          changed_when: false
+
+        - name: "system | parse"
+          ansible.builtin.set_fact:
+            _sys_data: "{{ dict(_sys.stdout_lines | map('split', '=') | list) }}"
+
+        - name: "system | verify"
+          ansible.builtin.assert:
+            that:
+              - _sys_data.timezone == timezone
+              - _sys_data.hostname == inventory_hostname_short
+              - (ip_forward is not defined) or (_sys_data.ip_forward == (ip_forward | ternary('1', '0')))
+              - (journal_max_size is not defined) or (journal_max_size in _sys_data.journal_conf)
+              - (max_open_files_soft is not defined) or (_sys_data.ulimit_soft | int >= max_open_files_soft | int)
+            fail_msg: |
+              System check failed:
+                timezone: {{ _sys_data.timezone }} (expected: {{ timezone }})
+                hostname: {{ _sys_data.hostname }} (expected: {{ inventory_hostname_short }})
+            quiet: true
+
+    # =========================================================================
+    # Users checks
+    # =========================================================================
+    - name: "users"
+      block:
+        - name: "users | collect"
+          ansible.builtin.raw: |
+            id ansible >/dev/null 2>&1 && echo "ansible_exists=yes" || echo "ansible_exists=no"
+            groups ansible 2>/dev/null | grep -q wheel && echo "ansible_wheel=yes" || echo "ansible_wheel=no"
+          register: _users
+          changed_when: false
+
+        - name: "users | parse"
+          ansible.builtin.set_fact:
+            _users_data: "{{ dict(_users.stdout_lines | map('split', '=') | list) }}"
+
+        - name: "users | verify"
+          ansible.builtin.assert:
+            that:
+              - _users_data.ansible_exists == 'yes'
+              - _users_data.ansible_wheel == 'yes'
+            fail_msg: "User 'ansible' must exist and be in wheel group"
+            quiet: true
+
+    # =========================================================================
+    # Storage checks
+    # =========================================================================
+    - name: "storage"
+      block:
+        - name: "storage | collect"
+          ansible.builtin.raw: |
+            mountpoint -q / && echo "root_mounted=yes" || echo "root_mounted=no"
+            swapon --show --noheadings 2>/dev/null | head -1 | awk '{print "swap_active=" ($1 ? "yes" : "no")}'
+            [ -z "$(swapon --show --noheadings 2>/dev/null)" ] && echo "swap_active=no" || true
+          register: _storage
+          changed_when: false
+
+        - name: "storage | parse"
+          ansible.builtin.set_fact:
+            _storage_data: "{{ dict(_storage.stdout_lines | select() | map('split', '=') | list) }}"
+
+        - name: "storage | verify root"
+          ansible.builtin.assert:
+            that:
+              - _storage_data.root_mounted == 'yes'
+            fail_msg: "Root filesystem is not mounted"
+            quiet: true
+
+        - name: "storage | verify swap"
+          ansible.builtin.assert:
+            that:
+              - _storage_data.swap_active == 'yes'
+            fail_msg: "Swap should be active (size: {{ swap_size }} MB)"
+            quiet: true
+          when: swap_size is defined and swap_size | int > 0
+
+        - name: "storage | verify additional mounts"
+          when: additional_disks is defined and additional_disks | length > 0
+          block:
+            - name: "storage | get mount points"
+              ansible.builtin.set_fact:
+                _expected_mounts: >-
+                  {{ additional_disks | map(attribute='partitions') | flatten
+                     | selectattr('mount_path', 'defined') | map(attribute='mount_path') | list }}
+
+            - name: "storage | check mounts"
+              ansible.builtin.raw: "mountpoint -q {{ item }} && echo 'ok' || echo 'FAIL:{{ item }}'"
+              loop: "{{ _expected_mounts }}"
+              register: _mount_results
+              changed_when: false
+
+            - name: "storage | verify mounts"
+              ansible.builtin.assert:
+                that:
+                  - "'FAIL' not in item.stdout"
+                fail_msg: "Mount point not mounted: {{ item.item }}"
+                quiet: true
+              loop: "{{ _mount_results.results }}"
+              loop_control:
+                label: "{{ item.item }}"
+
+    # =========================================================================
+    # Network checks
+    # =========================================================================
+    - name: "network"
+      when: network_interfaces is defined and network_interfaces | length > 0
+      block:
+        - name: "network | check interfaces"
+          ansible.builtin.raw: "ip link show {{ item.name }} >/dev/null 2>&1 && echo 'up' || echo 'FAIL'"
+          loop: "{{ network_interfaces }}"
+          loop_control:
+            label: "{{ item.name }}"
+          register: _iface_results
+          changed_when: false
+
+        - name: "network | verify interfaces"
+          ansible.builtin.assert:
+            that:
+              - "'FAIL' not in item.stdout"
+            fail_msg: "Interface not found: {{ network_interfaces[idx].name }}"
+            quiet: true
+          loop: "{{ _iface_results.results }}"
+          loop_control:
+            index_var: idx
+            label: "{{ network_interfaces[idx].name }}"
+
+        - name: "network | verify static IPs"
+          when: network_interfaces | selectattr('static_ip', 'defined') | list | length > 0
+          block:
+            - name: "network | get IPs"
+              ansible.builtin.raw: "ip -o -4 addr show {{ item.name }} | awk '{print $4}' | cut -d/ -f1"
+              loop: "{{ network_interfaces | selectattr('static_ip', 'defined') | list }}"
+              loop_control:
+                label: "{{ item.name }}"
+              register: _ip_results
+              changed_when: false
+
+            - name: "network | verify IPs"
+              ansible.builtin.assert:
+                that:
+                  - item.stdout | trim == (network_interfaces | selectattr('static_ip', 'defined') | list)[idx].static_ip
+                fail_msg: "IP mismatch on {{ (network_interfaces | selectattr('static_ip', 'defined') | list)[idx].name }}"
+                quiet: true
+              loop: "{{ _ip_results.results }}"
+              loop_control:
+                index_var: idx
+                label: "{{ (network_interfaces | selectattr('static_ip', 'defined') | list)[idx].name }}"
+
+    # =========================================================================
+    # Services checks
+    # =========================================================================
+    - name: "services"
+      block:
+        - name: "services | collect"
+          ansible.builtin.raw: |
+            echo "nftables=$(systemctl is-active nftables 2>/dev/null || echo inactive)"
+            echo "sshd=$(systemctl is-active sshd 2>/dev/null || echo inactive)"
+            echo "zincati=$(systemctl is-active zincati 2>/dev/null || echo inactive)"
+            ss -tln | grep -q ':{{ ssh_port | default(22) }} ' && echo "ssh_port=listening" || echo "ssh_port=not_listening"
+            podman --version >/dev/null 2>&1 && echo "podman=ok" || echo "podman=missing"
+            readlink -f /usr/local/bin/docker 2>/dev/null | grep -q podman && echo "docker_symlink=ok" || echo "docker_symlink=missing"
+          register: _services
+          changed_when: false
+
+        - name: "services | parse"
+          ansible.builtin.set_fact:
+            _services_data: "{{ dict(_services.stdout_lines | select() | map('split', '=') | list) }}"
+
+        - name: "services | verify"
+          ansible.builtin.assert:
+            that:
+              - _services_data.nftables == 'active'
+              - _services_data.sshd == 'active'
+              - _services_data.zincati == 'active'
+              - _services_data.ssh_port == 'listening'
+              - _services_data.podman == 'ok'
+              - _services_data.docker_symlink == 'ok'
+            fail_msg: |
+              Services check failed:
+                nftables: {{ _services_data.nftables }} (expected: active)
+                sshd: {{ _services_data.sshd }} (expected: active)
+                zincati: {{ _services_data.zincati }} (expected: active)
+                ssh_port: {{ _services_data.ssh_port }} (expected: listening)
+                podman: {{ _services_data.podman }} (expected: ok)
+                docker_symlink: {{ _services_data.docker_symlink }} (expected: ok)
+            quiet: true
+
+        - name: "services | verify zincati config"
+          block:
+            - name: "services | get zincati config"
+              ansible.builtin.raw: cat /etc/zincati/config.d/55-updates-strategy.toml 2>/dev/null || echo "NOT_FOUND"
+              register: _zincati
+              changed_when: false
+
+            - name: "services | verify zincati"
+              ansible.builtin.assert:
+                that:
+                  - "'NOT_FOUND' not in _zincati.stdout"
+                  - "maintenance_window_days in _zincati.stdout"
+                  - "maintenance_window_start in _zincati.stdout"
+                fail_msg: "Zincati config invalid or missing"
+                quiet: true
+
+    # =========================================================================
+    # Sysctl checks
+    # =========================================================================
+    - name: "sysctl"
+      block:
+        - name: "sysctl | define mapping"
+          ansible.builtin.set_fact:
+            _sysctl_map:
+              # Network buffers
+              net_rmem_max: net.core.rmem_max
+              net_wmem_max: net.core.wmem_max
+              netdev_max_backlog: net.core.netdev_max_backlog
+              somaxconn: net.core.somaxconn
+              tcp_max_syn_backlog: net.ipv4.tcp_max_syn_backlog
+              # TCP tuning
+              tcp_congestion_control: net.ipv4.tcp_congestion_control
+              default_qdisc: net.core.default_qdisc
+              tcp_max_tw_buckets: net.ipv4.tcp_max_tw_buckets
+              tcp_tw_reuse: net.ipv4.tcp_tw_reuse
+              tcp_fin_timeout: net.ipv4.tcp_fin_timeout
+              tcp_keepalive_time: net.ipv4.tcp_keepalive_time
+              tcp_keepalive_intvl: net.ipv4.tcp_keepalive_intvl
+              tcp_keepalive_probes: net.ipv4.tcp_keepalive_probes
+              tcp_slow_start_after_idle: net.ipv4.tcp_slow_start_after_idle
+              tcp_mtu_probing: net.ipv4.tcp_mtu_probing
+              tcp_fastopen: net.ipv4.tcp_fastopen
+              # VM/Memory
+              vm_swappiness: vm.swappiness
+              vm_dirty_ratio: vm.dirty_ratio
+              vm_dirty_background_ratio: vm.dirty_background_ratio
+              fs_file_max: fs.file-max
+              kernel_panic_timeout: kernel.panic
+
+        - name: "sysctl | build check list"
+          ansible.builtin.set_fact:
+            _sysctl_checks: >-
+              {{ _sysctl_checks | default([]) + [{'var': item.key, 'key': item.value, 'expected': lookup('vars', item.key)}] }}
+          loop: "{{ _sysctl_map | dict2items }}"
+          when: lookup('vars', item.key, default='__undefined__') != '__undefined__'
+          loop_control:
+            label: "{{ item.key }}"
+
+        - name: "sysctl | verify"
+          when: _sysctl_checks | default([]) | length > 0
+          block:
+            - name: "sysctl | collect values"
+              ansible.builtin.raw: "sysctl -n {{ item.key }}"
+              loop: "{{ _sysctl_checks }}"
+              loop_control:
+                label: "{{ item.key }}"
+              register: _sysctl_results
+              changed_when: false
+
+            - name: "sysctl | verify values"
+              ansible.builtin.assert:
+                that:
+                  - item.stdout | trim == (_sysctl_checks[idx].expected | string)
+                fail_msg: "{{ _sysctl_checks[idx].key }}: got '{{ item.stdout | trim }}', expected '{{ _sysctl_checks[idx].expected }}'"
+                quiet: true
+              loop: "{{ _sysctl_results.results }}"
+              loop_control:
+                index_var: idx
+                label: "{{ _sysctl_checks[idx].key }}"
+
+    # =========================================================================
+    # Summary
+    # =========================================================================
+    - name: "✅ VERIFIED {{ inventory_hostname }}"
+      ansible.builtin.debug:
+        msg: "All checks passed"

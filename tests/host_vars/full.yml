@@ -1,0 +1,122 @@
+---
+# =============================================================================
+# FULL: Complete Feature Coverage Test
+# =============================================================================
+# Tests:
+#   - Multi-disk: system + additional disk with partitions
+#   - Swap partition
+#   - Multi-network: WAN (DHCP) + LAN (static)
+#   - Custom timezone
+#   - All sysctl parameters
+#   - All journal/process limits
+#   - IPv6 RA disabled
+#
+# Purpose: Full coverage - verify all features work together
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# SSH (non-standard port for testing)
+# -----------------------------------------------------------------------------
+ssh_port: 2222
+
+# -----------------------------------------------------------------------------
+# System (non-default values)
+# -----------------------------------------------------------------------------
+timezone: Europe/Moscow
+
+# Journal settings
+journal_max_size: 1G
+journal_max_file_size: 100M
+journal_retention: 2weeks
+
+# Process limits
+max_open_files_soft: 131072
+max_open_files_hard: 262144
+max_processes_soft: 131072
+max_processes_hard: 262144
+
+# -----------------------------------------------------------------------------
+# Sysctl: Network buffers (10Gbps tuning)
+# -----------------------------------------------------------------------------
+net_rmem_max: 67108864
+net_wmem_max: 67108864
+tcp_rmem: "4096 131072 67108864"
+tcp_wmem: "4096 131072 67108864"
+netdev_max_backlog: 16384
+somaxconn: 16384
+tcp_max_syn_backlog: 16384
+ip_local_port_range: "1024 65535"
+
+# -----------------------------------------------------------------------------
+# Sysctl: TCP tuning
+# -----------------------------------------------------------------------------
+tcp_congestion_control: bbr
+default_qdisc: fq
+
+# TIME_WAIT optimization
+tcp_max_tw_buckets: 2000000
+tcp_tw_reuse: 1
+tcp_fin_timeout: 10
+
+# Keepalive
+tcp_keepalive_time: 60
+tcp_keepalive_intvl: 10
+tcp_keepalive_probes: 3
+
+# Performance
+tcp_slow_start_after_idle: 0
+tcp_mtu_probing: 1
+tcp_fastopen: 3
+
+# -----------------------------------------------------------------------------
+# Sysctl: Security
+# -----------------------------------------------------------------------------
+disable_ipv6_ra: true
+
+# -----------------------------------------------------------------------------
+# Sysctl: VM/Memory
+# -----------------------------------------------------------------------------
+vm_swappiness: 1
+vm_dirty_ratio: 20
+vm_dirty_background_ratio: 5
+fs_file_max: 4194304
+kernel_panic_timeout: 5
+
+# -----------------------------------------------------------------------------
+# Storage
+# -----------------------------------------------------------------------------
+system_disk: /dev/vda
+wipe_system_disk: true
+swap_size: 2048
+
+additional_disks:
+  - device: /dev/vdb
+    wipe_table: true
+    partitions:
+      - label: data1
+        size_mib: 1024
+        mount_path: /var/data1
+        format: xfs
+      - label: data2
+        size_mib: 0
+        mount_path: /var/data2
+        format: xfs
+
+# -----------------------------------------------------------------------------
+# Network (WAN + LAN)
+# -----------------------------------------------------------------------------
+network_interfaces:
+  - name: wan0
+    type: wan
+    mac_address: "DE:0C:DF:04:6D:30"
+    dhcp: true
+    default_route: true
+
+  - name: lan0
+    type: lan
+    mac_address: "DE:0C:DF:04:6D:31"
+    static_ip: "192.168.100.1"
+    network_prefix: 24
+    dns_servers:
+      - "8.8.8.8"
+      - "8.8.4.4"
